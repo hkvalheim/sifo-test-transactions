@@ -13,6 +13,9 @@ This repository contains the database setup and test data generation for a perso
 ├── podman-compose.yml
 ├── backups/           # Directory for database backups
 └── sql/              # SQL scripts including test data
+    ├── personal_finance.sql      # Database initialization script
+    ├── sifo_categories.sql       # SIFO categories initialization
+    └── sifo_transactions_testdata.sql  # Test data generation
 ```
 
 ## Getting Started
@@ -24,6 +27,13 @@ podman-compose up -d
 
 # Verify the container is running
 podman ps
+
+# Initialize database schema
+podman cp ./sql/personal_finance.sql personal-finance-db:/tmp/
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -f /tmp/personal_finance.sql
+
+# Verify tables were created
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -c "\dt"
 ```
 
 ### 2. Database Connection
@@ -33,6 +43,30 @@ podman exec -it personal-finance-db psql -U financeapp -d personal_finance
 ```
 
 ## Database Operations
+
+### Loading Test Data
+```bash
+# First, create a backup of existing data (recommended)
+podman exec personal-finance-db pg_dump -U financeapp -d personal_finance -t transactions -F c > \
+    ./backups/transactions_backup_$(date +%Y%m%d).dump
+
+# Copy test data script into container and execute
+podman cp ./sql/sifo_categories.sql personal-finance-db:/tmp/
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -f /tmp/sifo_categories.sql
+
+podman cp ./sql/sifo_transactions_testdata.sql personal-finance-db:/tmp/
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -f /tmp/sifo_transactions_testdata.sql
+
+# Verify the test data
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -c \
+    "SELECT c.name as category, COUNT(*) as count, 
+     ROUND(ABS(SUM(t.amount))::numeric, 2) as total_amount
+     FROM transactions t
+     JOIN categories c ON t.category_id = c.id
+     WHERE EXTRACT(YEAR FROM t.booking_date) = 2024
+     GROUP BY c.name
+     ORDER BY c.name;"
+```
 
 ### Backup and Restore
 ```bash
@@ -49,25 +83,10 @@ cat ./backups/backup_20240101.dump | \
     podman exec -i personal-finance-db pg_restore -U financeapp -d personal_finance
 ```
 
-### Loading Test Data
+### Test collation
 ```bash
-# First, create a backup of existing data (recommended)
-podman exec personal-finance-db pg_dump -U financeapp -d personal_finance -t transactions -F c > \
-    ./backups/transactions_backup_$(date +%Y%m%d).dump
-
-# Copy test data script into container and execute
-podman cp ./sql/sifo_transactions_testdata.sql personal-finance-db:/tmp/
-podman exec -it personal-finance-db psql -U financeapp -d personal_finance -f /tmp/sifo_transactions_testdata.sql
-
-# Verify the test data
-podman exec -it personal-finance-db psql -U financeapp -d personal_finance -c \
-    "SELECT c.name as category, COUNT(*) as count, 
-     ROUND(ABS(SUM(t.amount))::numeric, 2) as total_amount
-     FROM transactions t
-     JOIN categories c ON t.category_id = c.id
-     WHERE EXTRACT(YEAR FROM t.booking_date) = 2024
-     GROUP BY c.name
-     ORDER BY c.name;"
+podman cp ./sql/test_collation.sql personal-finance-db:/tmp/
+podman exec -it personal-finance-db psql -U financeapp -d personal_finance -f /tmp/test_collation.sql
 ```
 
 ### Useful Database Commands
